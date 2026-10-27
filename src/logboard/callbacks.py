@@ -1,4 +1,4 @@
-from dash import Output, Input, html
+from dash import Output, Input, State, ctx, no_update, html
 import os
 import glob
 import pandas as pd
@@ -6,20 +6,149 @@ import numpy as np
 import plotly.graph_objects as go
 import dash_leaflet as dl
 from datetime import datetime, timezone
+from pathlib import Path
+from functools import lru_cache
+
+LOGS_DIR = Path(__file__).resolve().parents[2] / 'logs'
+LOG_COLUMNS = {
+    'header.stamp.secs',
+    'header.stamp.nsecs',
+    'pose.pose.position.x',
+    'pose.pose.position.y',
+    'pose.pose.position.z',
+    'twist.twist.linear.x',
+    'twist.twist.linear.y',
+}
+RESOLUTION_FACTOR = 2
+CHART_FONT = {'family': 'Arial, sans-serif', 'size': 12, 'color': '#334155'}
+GRID_COLOR = '#e2e8f0'
+
+def style_time_series(figure, y_title):
+    figure.update_layout(
+        template='plotly_white',
+        paper_bgcolor='#ffffff',
+        plot_bgcolor='#ffffff',
+        font=CHART_FONT,
+        margin=dict(l=65, r=25, b=55, t=25),
+        hovermode='x unified',
+        hoverlabel=dict(
+            bgcolor='#0f172a',
+            bordercolor='#0f172a',
+            font=dict(color='#ffffff')
+        ),
+        xaxis=dict(
+            title=dict(text='Tempo decorrido (s)', standoff=12),
+            showline=True,
+            linecolor=GRID_COLOR,
+            linewidth=1,
+            gridcolor=GRID_COLOR,
+            zeroline=False,
+            ticks='outside',
+            tickcolor=GRID_COLOR
+        ),
+        yaxis=dict(
+            title=dict(text=y_title, standoff=12),
+            showline=True,
+            linecolor=GRID_COLOR,
+            linewidth=1,
+            gridcolor=GRID_COLOR,
+            zeroline=False,
+            ticks='outside',
+            tickcolor=GRID_COLOR
+        )
+    )
+
+@lru_cache(maxsize=8)
+def load_log(file_path, modified_time):
+    return pd.read_csv(file_path, usecols=lambda column: column in LOG_COLUMNS)
+
+def interpolate_series(time_values, *series):
+    if len(time_values) < 2:
+        return time_values, series
+
+    sample_count = (len(time_values) - 1) * RESOLUTION_FACTOR + 1
+    smooth_time = np.linspace(time_values[0], time_values[-1], sample_count)
+    smooth_series = tuple(
+        np.interp(smooth_time, time_values, values) for values in series
+    )
+    return smooth_time, smooth_series
+
+def get_log_files(selected_value):
+    if not selected_value:
+        return []
+    if selected_value == 'all':
+        return sorted(glob.glob(str(LOGS_DIR / '*.csv')))
+    return [selected_value]
+
+def get_elapsed_seconds(df):
+    if 'header.stamp.secs' in df.columns:
+        timestamps = pd.to_numeric(df['header.stamp.secs'], errors='coerce').to_numpy(dtype=float)
+        if 'header.stamp.nsecs' in df.columns:
+            nanoseconds = pd.to_numeric(df['header.stamp.nsecs'], errors='coerce').fillna(0).to_numpy(dtype=float)
+            timestamps += nanoseconds / 1_000_000_000
+        return timestamps - timestamps[0]
+    return np.arange(len(df), dtype=float)
+
+def format_duration(seconds):
+    total_seconds = max(0, int(seconds))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f'{minutes:02d}:{seconds:02d}'
 
 def register_callbacks(app):
+    @app.callback(
+        Output('timestamp-slider', 'max'),
+        Input('dropdown-log-selector', 'value')
+    )
+    def update_playback_range(selected_value):
+        durations = []
+        for file_path in get_log_files(selected_value):
+            modified_time = Path(file_path).stat().st_mtime_ns
+            df = load_log(file_path, modified_time)
+            if not df.empty:
+                durations.append(float(get_elapsed_seconds(df)[-1]))
+        return max(max(durations, default=0), 0.1)
+
+    @app.callback(
+        [Output('timestamp-slider', 'value'),
+         Output('playback-interval', 'disabled'),
+         Output('playback-button', 'children')],
+        [Input('playback-button', 'n_clicks'),
+         Input('playback-interval', 'n_intervals'),
+         Input('dropdown-log-selector', 'value')],
+        [State('timestamp-slider', 'value'),
+         State('timestamp-slider', 'max'),
+         State('playback-interval', 'disabled')]
+    )
+    def control_playback(n_clicks, n_intervals, selected_value, current_time, max_time, paused):
+        trigger = ctx.triggered_id
+        if trigger == 'dropdown-log-selector':
+            return 0, True, '▶ Reproduzir'
+        if trigger == 'playback-button':
+            if paused:
+                start_time = 0 if current_time >= max_time else current_time
+                return start_time, False, '⏸ Pausar'
+            return current_time, True, '▶ Reproduzir'
+        if trigger == 'playback-interval':
+            next_time = min(current_time + 0.5, max_time)
+            finished = next_time >= max_time
+            return next_time, finished, '▶ Reproduzir' if finished else '⏸ Pausar'
+        return no_update, no_update, no_update
+
     @app.callback(
         [Output('trajectory-layer-2d', 'children'),
          Output('graph-3d-view', 'figure'),
          Output('graph-depth-view', 'figure'),
          Output('graph-speed-view', 'figure'),
          Output('legend-items-container', 'children'),
-         Output('timestamp-items-container', 'children')],
-        Input('dropdown-log-selector', 'value')
+         Output('timestamp-items-container', 'children'),
+         Output('playback-time-label', 'children')],
+        [Input('dropdown-log-selector', 'value'),
+         Input('timestamp-slider', 'value'),
+         Input('timestamp-slider', 'max')]
     )
-    def update_dashboards(selected_value):
+    def update_dashboards(selected_value, current_time, max_time):
         if not selected_value:
-            return [], go.Figure(), [], [], [], []
+            return [], go.Figure(), go.Figure(), go.Figure(), [], [], '00:00 / 00:00'
         
         map_elements_2d = []
         fig_3d = go.Figure()
@@ -29,7 +158,7 @@ def register_callbacks(app):
         fig_speed = go.Figure()
         
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
-        log_files = [selected_value] if selected_value != 'all' else glob.glob('../logs/*.csv')
+        log_files = get_log_files(selected_value)
 
         def get_z_values(df):
             if 'pose.pose.position.z' in df.columns:
@@ -45,45 +174,77 @@ def register_callbacks(app):
             return datetime.fromtimestamp(float(secs), tz=timezone.utc).strftime('%d/%m/%Y %H:%M:%S')
         
         for i, file_path in enumerate(log_files):
-            df = pd.read_csv(file_path)
+            modified_time = Path(file_path).stat().st_mtime_ns
+            df = load_log(file_path, modified_time)
             if df.empty:
                 continue
-            
-            x = df['pose.pose.position.x']
-            y = df['pose.pose.position.y']
-            z = get_z_values(df)
+
+            elapsed = get_elapsed_seconds(df)
             timestamp = get_timestamp(df)
-            
-            positions_2d = list(zip(x, y))
+            visible = elapsed <= current_time
+            if not visible.any():
+                continue
+            visible_df = df.loc[visible]
+            x = visible_df['pose.pose.position.x']
+            y = visible_df['pose.pose.position.y']
+            z = get_z_values(visible_df)
+            visible_elapsed = elapsed[visible]
+
+            speed = None
+            if 'twist.twist.linear.x' in visible_df.columns and 'twist.twist.linear.y' in visible_df.columns:
+                speed = np.sqrt(
+                    visible_df['twist.twist.linear.x'].to_numpy() ** 2
+                    + visible_df['twist.twist.linear.y'].to_numpy() ** 2
+                )
+
+            smooth_elapsed, smooth_values = interpolate_series(
+                visible_elapsed,
+                x.to_numpy(),
+                y.to_numpy(),
+                z.to_numpy() if hasattr(z, 'to_numpy') else z,
+                *([speed] if speed is not None else [])
+            )
+            smooth_x, smooth_y, smooth_z = smooth_values[:3]
+            positions_2d = list(zip(smooth_x, smooth_y))
             color = colors[i % len(colors)]
             filename = os.path.basename(file_path)
             
             # --- Mapa 2D ---
             map_elements_2d.append(
-                dl.Polyline(positions=positions_2d, color=color, weight=3, opacity=0.8)
+                dl.Polyline(positions=positions_2d, color=color, weight=4, opacity=0.9)
+            )
+            map_elements_2d.append(
+                dl.CircleMarker(
+                    center=positions_2d[0],
+                    radius=4,
+                    color='#ffffff',
+                    weight=2,
+                    fillColor=color,
+                    fillOpacity=1
+                )
             )
             map_elements_2d.append(
                 dl.Marker(
                     position=positions_2d[-1],
-                    children=dl.Tooltip(f"Log: {filename}")
+                    children=dl.Tooltip(f"Posição atual: {filename}")
                 )
             )
             
             # --- Gráfico 3D ---
             fig_3d.add_trace(go.Scatter3d(
-                x=x, y=y, z=z,
+                x=smooth_x, y=smooth_y, z=smooth_z,
                 mode='lines',
                 name=filename,
-                line=dict(color=color, width=4),
+                line=dict(color=color, width=5),
                 opacity=0.8
             ))
             
             fig_3d.add_trace(go.Scatter3d(
-                x=[x.iloc[-1]], y=[y.iloc[-1]], z=[z.iloc[-1]],
+                x=[smooth_x[-1]], y=[smooth_y[-1]], z=[smooth_z[-1]],
                 mode='markers',
-                marker=dict(size=6, color=color),
+                marker=dict(size=7, color=color, line=dict(color='#ffffff', width=1)),
                 showlegend=False,
-                text=f"Fim: {filename}"
+                text=f"Posição atual: {filename}"
             ))
 
             # --- Legenda ---
@@ -122,59 +283,73 @@ def register_callbacks(app):
                 )
             )
 
-            if timestamp is not None:
-                t_relativo = timestamp - timestamp.iloc[0]
+            fig_depth.add_trace(go.Scatter(
+                x=smooth_elapsed,
+                y=smooth_z,
+                mode='lines',
+                name=filename,
+                line=dict(color=color, width=3, shape='spline', smoothing=1.1),
+                opacity=0.8
+            ))
 
-                fig_depth.add_trace(go.Scatter(
-                    x=t_relativo,
-                    y=z,
-                    mode='lines',
-                    name=filename,
-                    line=dict(color=color, width=2.5),
-                    opacity=0.8
-                ))
-
-            if 'twist.twist.linear.x' in df.columns and 'twist.twist.linear.y' in df.columns:
-                v_x = df['twist.twist.linear.x']
-                v_y = df['twist.twist.linear.y']
-                speed = np.sqrt(v_x**2 + v_y**2)
-    
-                t_relativo = timestamp - timestamp.iloc[0] if timestamp is not None else range(len(speed))
-                
+            if speed is not None:
                 fig_speed.add_trace(go.Scatter(
-                    x=t_relativo,
-                    y=speed,
+                    x=smooth_elapsed,
+                    y=smooth_values[3],
                     mode='lines',
                     name=filename,
-                    line=dict(color=color, width=2)
+                    line=dict(color=color, width=3, shape='spline', smoothing=1.1)
                 ))
 
         fig_3d.update_layout(
+            template='plotly_white',
+            paper_bgcolor='#ffffff',
+            plot_bgcolor='#ffffff',
+            font=CHART_FONT,
             scene=dict(
-                xaxis_title='X (m)',
-                yaxis_title='Y (m)',
-                zaxis_title='Z / Altitude (m)',
-                aspectmode='auto'
+                xaxis=dict(
+                    title='Latitude (°)',
+                    backgroundcolor='#f8fafc',
+                    gridcolor=GRID_COLOR,
+                    zerolinecolor='#cbd5e1',
+                    showbackground=True
+                ),
+                yaxis=dict(
+                    title='Longitude (°)',
+                    backgroundcolor='#f8fafc',
+                    gridcolor=GRID_COLOR,
+                    zerolinecolor='#cbd5e1',
+                    showbackground=True
+                ),
+                zaxis=dict(
+                    title='Profundidade (m)',
+                    backgroundcolor='#f8fafc',
+                    gridcolor=GRID_COLOR,
+                    zerolinecolor='#cbd5e1',
+                    showbackground=True
+                ),
+                aspectmode='auto',
+                camera=dict(eye=dict(x=1.6, y=1.6, z=1.2))
             ),
             margin=dict(l=0, r=0, b=0, t=10),
-            showlegend=False
+            showlegend=True,
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='left',
+                x=0,
+                bgcolor='rgba(255,255,255,0.75)'
+            ),
+            hoverlabel=dict(
+                bgcolor='#0f172a',
+                bordercolor='#0f172a',
+                font=dict(color='#ffffff')
+            )
         )
 
-        fig_depth.update_layout(
-            xaxis_title='Tempo (s)',
-            yaxis_title='Profundidade (m)',
-            margin=dict(l=40, r=20, b=40, t=20),
-            hovermode='closest',
-            showlegend=False    
-        )
-        fig_speed.update_layout(
-            xaxis_title='Tempo (s)',
-            yaxis_title='Velocidade Linear (m/s)',
-            margin=dict(l=40, r=20, b=40, t=20),
-            hovermode='closest',
-            showlegend=False
-        )
-
-
+        style_time_series(fig_depth, 'Profundidade (m)')
+        style_time_series(fig_speed, 'Velocidade (m/s)')
                 
-        return map_elements_2d, fig_3d, fig_depth, fig_speed, legend_elements, timestamp_elements
+        time_label = f'{format_duration(current_time)} / {format_duration(max_time)}'
+        return map_elements_2d, fig_3d, fig_depth, fig_speed, legend_elements, timestamp_elements, time_label

@@ -1,16 +1,19 @@
 from dash import html, dcc
 import os
 import glob
+from pathlib import Path
 import dash_leaflet as dl
 
+LOGS_DIR = Path(__file__).resolve().parents[2] / 'logs'
+
 def get_log_options():
-    log_files = glob.glob('logs/*.csv')
+    log_files = glob.glob(str(LOGS_DIR / '*.csv'))
     options = [{'label': os.path.basename(f), 'value': f} for f in log_files]
     options.insert(0, {'label': ' Todas as Trajetórias ', 'value': 'all'})
     return options
 
 def create_layout():
-    return html.Div([
+    dashboard = html.Div([
 
         html.H1("Dashboard TOMSA - Vista Superior/Inferior", style={'textAlign': 'center'}),
             
@@ -34,7 +37,7 @@ def create_layout():
                     dl.Map(
                         id='map-global-view',
                         center=[41.4520, -8.8132],
-                        zoom=14, 
+                        zoom=17,
                         children=[
                             dl.TileLayer(),
                             dl.TileLayer(
@@ -103,4 +106,44 @@ def create_layout():
                 'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
             })
         ], style={'width': '98%', 'margin': '0 auto'})
+    ], style={'paddingBottom': '100px'})
+
+    return html.Div([
+        dashboard,
+        html.Div([
+            html.Button(
+                '▶ Reproduzir',
+                id='playback-button',
+                n_clicks=0,
+                style={'minWidth': '125px'}
+            ),
+            html.Div([
+                html.Div(id='playback-time-label', children='00:00 / 00:00',
+                         style={'fontVariantNumeric': 'tabular-nums', 'textAlign': 'center'}),
+                dcc.Slider(
+                    id='timestamp-slider',
+                    min=0,
+                    max=1,
+                    step=0.1,
+                    value=0,
+                    marks=None,
+                    tooltip={'placement': 'top', 'always_visible': False}
+                )
+            ], style={'flex': '1', 'minWidth': '200px'}),
+            dcc.Interval(id='playback-interval', interval=500, n_intervals=0, disabled=True)
+        ], style={
+            'position': 'fixed',
+            'bottom': '0',
+            'left': '0',
+            'width': '100%',
+            'boxSizing': 'border-box',
+            'display': 'flex',
+            'alignItems': 'center',
+            'gap': '20px',
+            'padding': '12px 24px',
+            'backgroundColor': '#fff',
+            'borderTop': '1px solid #ccc',
+            'boxShadow': '0 -2px 8px rgba(0,0,0,0.12)',
+            'zIndex': '1000'
+        })
     ])

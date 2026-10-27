@@ -1,0 +1,5 @@
+dash
+dash-leaflet
+numpy
+pandas
+plotly

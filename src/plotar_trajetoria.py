@@ -1,14 +1,11 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-<<<<<<< HEAD
 
-# --- PASSO 1: Carregar os dados de log ---
-# Lê o ficheiro CSV do robô que está na pasta de logs
+# Carregar os dados
 df = pd.read_csv('../logs/robot7_s1.csv')
 
-# --- PASSO 2: Definir a referência inicial da Aguçadoura ---
-# Estes valores marcam a origem geodética local (latitude e longitude de referência)
+#  referência inicial da Aguçadoura 
 lat0 = 41.45201666666667
 lon0 = -8.81322222222222
 
@@ -16,16 +13,12 @@ lon0 = -8.81322222222222
 lat = df['pose.pose.position.x'].values
 lon = df['pose.pose.position.y'].values
 
-# --- PASSO 3: Mudança de Base / Conversão para Coordenadas Cartesianas (NED) ---
-# Multiplicamos a diferença geográfica por fatores de conversão aproximados 
-# para transformar graus em metros (referencial North-East-Down no plano local)
 d_north = (lat - lat0) * 111132.92
 d_east = (lon - lon0) * 85393.55
 
-# --- PASSO 4: Desenhar o Gráfico com Matplotlib ---
+#  Desenhar o Gráfico com Matplotlib
 plt.figure(figsize=(8, 6))
 
-# Cria uma linha a azul ligando as posições (East, North) do robô
 plt.plot(d_east, d_north, label='Trajetória do Robô', color='blue', linewidth=2)
 
 # Adiciona título e rótulos aos eixos (medidos em metros a partir da origem)
@@ -39,7 +32,6 @@ plt.legend()
 
 # Exibe o gráfico numa janela interativa
 plt.show()
-=======
 from pathlib import Path
 
 # --- Parâmetros ---
@@ -58,7 +50,7 @@ def load(robot_id):
                               'pose.pose.position.y', 'pose.pose.position.z'])
     north = (df['pose.pose.position.x'] - lat0) * M_LAT
     east = (df['pose.pose.position.y'] - lon0) * M_LON
-    down = H0 - df['pose.pose.position.z']         # NED: Down = profundidade
+    down = H0 - df['pose.pose.position.z']         
     return east.values, north.values, down.values
 
 fig = plt.figure(figsize=(9, 7))
@@ -82,4 +74,3 @@ ax.set_box_aspect((np.ptp(allx), np.ptp(ally), max(np.ptp(allz), 1) * EXAG))
 ax.set_title('Trajetórias 3D (referencial local NED)')
 ax.legend()
 plt.show()
->>>>>>> origin/main
