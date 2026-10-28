@@ -16,10 +16,14 @@ LOG_COLUMNS = {
     'pose.pose.position.x',
     'pose.pose.position.y',
     'pose.pose.position.z',
+    'pose.pose.orientation.x', 
+    'pose.pose.orientation.y', 
+    'pose.pose.orientation.z', 
+    'pose.pose.orientation.w',
     'twist.twist.linear.x',
     'twist.twist.linear.y',
 }
-RESOLUTION_FACTOR = 2
+
 CHART_FONT = {'family': 'Arial, sans-serif', 'size': 12, 'color': '#334155'}
 GRID_COLOR = '#e2e8f0'
 
@@ -62,17 +66,7 @@ def style_time_series(figure, y_title):
 def load_log(file_path, modified_time):
     return pd.read_csv(file_path, usecols=lambda column: column in LOG_COLUMNS)
 
-def interpolate_series(time_values, *series):
-    if len(time_values) < 2:
-        return time_values, series
-
-    sample_count = (len(time_values) - 1) * RESOLUTION_FACTOR + 1
-    smooth_time = np.linspace(time_values[0], time_values[-1], sample_count)
-    smooth_series = tuple(
-        np.interp(smooth_time, time_values, values) for values in series
-    )
-    return smooth_time, smooth_series
-
+#Carrega os ficheiros provenientes do dropdown, para all colcoca todos
 def get_log_files(selected_value):
     if not selected_value:
         return []
@@ -80,7 +74,8 @@ def get_log_files(selected_value):
         return sorted(glob.glob(str(LOGS_DIR / '*.csv')))
     return [selected_value]
 
-def get_elapsed_seconds(df):
+# Coloca o timestamp em segundos apartir do primeiro intstante
+def get_timestamp_time(df):
     if 'header.stamp.secs' in df.columns:
         timestamps = pd.to_numeric(df['header.stamp.secs'], errors='coerce').to_numpy(dtype=float)
         if 'header.stamp.nsecs' in df.columns:
@@ -89,26 +84,29 @@ def get_elapsed_seconds(df):
         return timestamps - timestamps[0]
     return np.arange(len(df), dtype=float)
 
+#Converte o tempo para o formato mm:ss
 def format_duration(seconds):
     total_seconds = max(0, int(seconds))
     minutes, seconds = divmod(total_seconds, 60)
     return f'{minutes:02d}:{seconds:02d}'
 
+
 def register_callbacks(app):
-    @app.callback(
+    @app.callback(  #define o tempo máximo do slider
         Output('timestamp-slider', 'max'),
         Input('dropdown-log-selector', 'value')
     )
+    #define o tempo máximo do slider de acordo com o ficheiro selecionado
     def update_playback_range(selected_value):
         durations = []
         for file_path in get_log_files(selected_value):
             modified_time = Path(file_path).stat().st_mtime_ns
             df = load_log(file_path, modified_time)
             if not df.empty:
-                durations.append(float(get_elapsed_seconds(df)[-1]))
+                durations.append(float(get_timestamp_time(df)[-1]))
         return max(max(durations, default=0), 0.1)
 
-    @app.callback(
+    @app.callback( #Controla o play e stop do botão do slider
         [Output('timestamp-slider', 'value'),
          Output('playback-interval', 'disabled'),
          Output('playback-button', 'children')],
@@ -119,6 +117,8 @@ def register_callbacks(app):
          State('timestamp-slider', 'max'),
          State('playback-interval', 'disabled')]
     )
+
+    #Controla o play e stop do botão do slider 
     def control_playback(n_clicks, n_intervals, selected_value, current_time, max_time, paused):
         trigger = ctx.triggered_id
         if trigger == 'dropdown-log-selector':
@@ -134,7 +134,7 @@ def register_callbacks(app):
             return next_time, finished, '▶ Reproduzir' if finished else '⏸ Pausar'
         return no_update, no_update, no_update
 
-    @app.callback(
+    @app.callback( #DEsenha os gráficos
         [Output('trajectory-layer-2d', 'children'),
          Output('graph-3d-view', 'figure'),
          Output('graph-depth-view', 'figure'),
@@ -146,11 +146,13 @@ def register_callbacks(app):
          Input('timestamp-slider', 'value'),
          Input('timestamp-slider', 'max')]
     )
+
+    #Desenha os gráficos de acordo com o ficheiro selecionado e o tempo do slider
     def update_dashboards(selected_value, current_time, max_time):
         if not selected_value:
             return [], go.Figure(), go.Figure(), go.Figure(), [], [], '00:00 / 00:00'
         
-        map_elements_2d = []
+        map_elements_2d = [] 
         fig_3d = go.Figure()
         legend_elements = []
         timestamp_elements = []
@@ -179,16 +181,22 @@ def register_callbacks(app):
             if df.empty:
                 continue
 
-            elapsed = get_elapsed_seconds(df)
+            elapsed = get_timestamp_time(df)
             timestamp = get_timestamp(df)
             visible = elapsed <= current_time
             if not visible.any():
                 continue
+            
+            # Filtrar os dados apenas até ao tempo atual (slider)
             visible_df = df.loc[visible]
-            x = visible_df['pose.pose.position.x']
-            y = visible_df['pose.pose.position.y']
-            z = get_z_values(visible_df)
             visible_elapsed = elapsed[visible]
+            
+            # Extrair arrays numpy diretamente
+            x_vals = visible_df['pose.pose.position.x'].to_numpy()
+            y_vals = visible_df['pose.pose.position.y'].to_numpy()
+            z_vals = get_z_values(visible_df)
+            if hasattr(z_vals, 'to_numpy'):
+                z_vals = z_vals.to_numpy()
 
             speed = None
             if 'twist.twist.linear.x' in visible_df.columns and 'twist.twist.linear.y' in visible_df.columns:
@@ -197,15 +205,7 @@ def register_callbacks(app):
                     + visible_df['twist.twist.linear.y'].to_numpy() ** 2
                 )
 
-            smooth_elapsed, smooth_values = interpolate_series(
-                visible_elapsed,
-                x.to_numpy(),
-                y.to_numpy(),
-                z.to_numpy() if hasattr(z, 'to_numpy') else z,
-                *([speed] if speed is not None else [])
-            )
-            smooth_x, smooth_y, smooth_z = smooth_values[:3]
-            positions_2d = list(zip(smooth_x, smooth_y))
+            positions_2d = list(zip(x_vals, y_vals))
             color = colors[i % len(colors)]
             filename = os.path.basename(file_path)
             
@@ -213,39 +213,41 @@ def register_callbacks(app):
             map_elements_2d.append(
                 dl.Polyline(positions=positions_2d, color=color, weight=4, opacity=0.9)
             )
-            map_elements_2d.append(
-                dl.CircleMarker(
-                    center=positions_2d[0],
-                    radius=4,
-                    color='#ffffff',
-                    weight=2,
-                    fillColor=color,
-                    fillOpacity=1
+            if positions_2d:
+                map_elements_2d.append(
+                    dl.CircleMarker(
+                        center=positions_2d[0],
+                        radius=4,
+                        color='#ffffff',
+                        weight=2,
+                        fillColor=color,
+                        fillOpacity=1
+                    )
                 )
-            )
-            map_elements_2d.append(
-                dl.Marker(
-                    position=positions_2d[-1],
-                    children=dl.Tooltip(f"Posição atual: {filename}")
+                map_elements_2d.append(
+                    dl.Marker(
+                        position=positions_2d[-1],
+                        children=dl.Tooltip(f"Posição atual: {filename}")
+                    )
                 )
-            )
             
             # --- Gráfico 3D ---
             fig_3d.add_trace(go.Scatter3d(
-                x=smooth_x, y=smooth_y, z=smooth_z,
+                x=x_vals, y=y_vals, z=z_vals,
                 mode='lines',
                 name=filename,
                 line=dict(color=color, width=5),
                 opacity=0.8
             ))
             
-            fig_3d.add_trace(go.Scatter3d(
-                x=[smooth_x[-1]], y=[smooth_y[-1]], z=[smooth_z[-1]],
-                mode='markers',
-                marker=dict(size=7, color=color, line=dict(color='#ffffff', width=1)),
-                showlegend=False,
-                text=f"Posição atual: {filename}"
-            ))
+            if len(x_vals) > 0:
+                fig_3d.add_trace(go.Scatter3d(
+                    x=[x_vals[-1]], y=[y_vals[-1]], z=[z_vals[-1]],
+                    mode='markers',
+                    marker=dict(size=7, color=color, line=dict(color='#ffffff', width=1)),
+                    showlegend=False,
+                    text=f"Posição atual: {filename}"
+                ))
 
             # --- Legenda ---
             legend_elements.append(
@@ -283,9 +285,10 @@ def register_callbacks(app):
                 )
             )
 
+            # --- Gráficos 2D (Profundidade e Velocidade) ---
             fig_depth.add_trace(go.Scatter(
-                x=smooth_elapsed,
-                y=smooth_z,
+                x=visible_elapsed,
+                y=z_vals,
                 mode='lines',
                 name=filename,
                 line=dict(color=color, width=3, shape='spline', smoothing=1.1),
@@ -294,13 +297,16 @@ def register_callbacks(app):
 
             if speed is not None:
                 fig_speed.add_trace(go.Scatter(
-                    x=smooth_elapsed,
-                    y=smooth_values[3],
+                    x=visible_elapsed,
+                    y=speed,
                     mode='lines',
                     name=filename,
                     line=dict(color=color, width=3, shape='spline', smoothing=1.1)
                 ))
 
+            
+
+        # --- Layouts Finais ---
         fig_3d.update_layout(
             template='plotly_white',
             paper_bgcolor='#ffffff',
