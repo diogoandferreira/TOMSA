@@ -24,3 +24,11 @@ Após o processo de instalação referido, seguem-se os seguintes passos:
 	1- source .venv/bin/activate
 	2- python3 app.py
 	3- abrir o link http://127.0.0.1:8051/ numa página separada
+
+Para o desenvolvimento desta dashboard, são necessárias as seguintes bibliotecas Python, listadas no ficheiro requirements.txt:
+ 
+dash
+dash-leaflet
+numpy
+pandas
+plotly
