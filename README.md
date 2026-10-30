@@ -27,8 +27,9 @@ Após o processo de instalação referido, seguem-se os seguintes passos:
 
 Para o desenvolvimento desta dashboard, são necessárias as seguintes bibliotecas Python, listadas no ficheiro requirements.txt:
  
-dash
-dash-leaflet
-numpy
-pandas
-plotly
+dash: Framework principal para a criação do dashboard interativo.
+dash-leaflet: Componente para integração do mapa 2D (OpenSeaMap).
+plotly: Biblioteca gráfica para renderização da trajetória e eixos em 3D.
+pandas: Manipulação e estruturação dos dados dos logs ROS (ficheiros CSV).
+numpy: Processamento vetorial e cálculos matemáticos de posições.
+
