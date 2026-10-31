@@ -73,13 +73,13 @@ source .venv/bin/activate
 ### 3. Instalar as dependências
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 Para confirmar a instalação:
 
 ```bash
-pip show dash dash-leaflet plotly pandas pyyaml pymap3d
+pip show dash dash-leaflet plotly pandas pyyaml 
 ```
 
 O Dash tem de ser da versão 4 ou superior.
