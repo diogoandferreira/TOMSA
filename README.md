@@ -50,7 +50,7 @@ A pasta dos logs é indicada em `config.yaml` (`logs_dir: logs`), relativa à pa
 ### 1. Obter o código
 
 ```bash
-git clone <URL-DO-REPOSITÓRIO> TOMSA
+git clone https://github.com/diogoandferreira/TOMSA.git 
 cd TOMSA
 ```
 
