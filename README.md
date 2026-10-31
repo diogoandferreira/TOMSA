@@ -133,7 +133,3 @@ O ficheiro só é lido no arranque: depois de o editar, reinicia o servidor. Se 
 2. Usa o botão **Reproduzir**, o seletor de velocidade e o slider de tempo, na barra de baixo.
 3. Na vista 3D podes rodar e fazer zoom com o rato.
 4. No radar, escolhe a referência: "Ponto inicial" ou um robot. O raio é a distância horizontal em metros e o ângulo é o azimute, a partir do norte, no sentido horário.
-
-## Referenciais e contas
-
-As posições (lat, lon, h) são convertidas para ECEF (elipsoide WGS84) e depois para NED, com origem na referência escolhida. Daí saem a distância horizontal, a distância 3D e o azimute. Esta conversão é a que está validada em `validate_ned.py`.
