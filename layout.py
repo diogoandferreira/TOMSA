@@ -55,7 +55,7 @@ def create_layout():
             ],
             className='map',
         ), class_name='card-main', body_class='card-body flush'),
-        card('Legenda', html.Div(id='legend-items-container'), class_name='card-side'),
+        card('Distância percorrida', html.Div(id='legend-items-container'), class_name='card-side'),
     ], className='row')
 
     # Linha 2: vista 3D (com bússola sobreposta) + timestamps
