@@ -1,0 +1,27 @@
+
+logs_dir: 'logs'     
+
+map:
+  center: [41.4520, -8.8132]    # [latitude, longitude] inicial do mapa 2D
+  zoom: 17
+
+playback:
+  interval_ms: 500              # período do relógio de reprodução (ms)
+  speeds: [1, 2, 5, 10, 30, 60, 100] # multiplicadores disponíveis
+  default_speed: 1
+
+radar:
+  reference: origin
+  origin:
+    lat: 41.45201666666667
+    lon: -8.81322222222222
+    h: 55.44791126176966
+
+#Cores para os robots nao defenidos a baixo
+colors: ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"]
+
+# Opcional: nome e cor de cada robot (chave = nome do ficheiro CSV)
+robots:
+  robot1_s1.csv: {label: "Robot 1", color: "#b41fa3"}
+  robot4_s1.csv: {label: "Robot 4", color: "#458fc5"}
+  robot7_s1.csv: {label: "Robot 7", color: "#50ec50"}
