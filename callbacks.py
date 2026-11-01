@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from functools import lru_cache
 
+
+#Importa configurações e funções do ficheiro config.py
 from config import CONFIG, LOGS_DIR, robot_color, robot_label
 
+#constantes do ficheiro csv
 LOG_COLUMNS = {
     'header.stamp.secs',
     'header.stamp.nsecs',
@@ -28,12 +31,9 @@ LOG_COLUMNS = {
 CHART_FONT = {'family': 'IBM Plex Sans, Arial, sans-serif', 'size': 12, 'color': '#334155'}
 GRID_COLOR = '#e2e8f0'
 
-COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
 
-
-# --------------------------------------------------------------------------- utilitários
+# estilo comum para os gráficos de dados
 def style_time_series(figure, y_title, max_time):
-    """Eixo X fixo em [0, duração total] para o gráfico não "esticar" durante o replay."""
     axis_style = dict(
         showline=True, linecolor=GRID_COLOR, linewidth=1,
         gridcolor=GRID_COLOR, zeroline=False,
@@ -52,11 +52,10 @@ def style_time_series(figure, y_title, max_time):
         yaxis=dict(title=dict(text=y_title, standoff=12), **axis_style),
     )
 
-
+#cache 
 @lru_cache(maxsize=8)
 def load_log(file_path, modified_time):
     return pd.read_csv(file_path, usecols=lambda column: column in LOG_COLUMNS)
-
 
 @lru_cache(maxsize=16)
 def get_bounds(file_path, modified_time):
@@ -72,9 +71,8 @@ def get_bounds(file_path, modified_time):
 
     return span('pose.pose.position.x'), span('pose.pose.position.y'), span('pose.pose.position.z')
 
-
+#identifica qual é a cota do logs mais alto e atribui a esse a altura do mar
 def get_sea_level():
-    """Cota da superfície do mar = z mais alto de TODOS os logs (referência comum a todos os robots)."""
 
     tops = []
     for file_path in sorted(glob.glob(str(LOGS_DIR / '*.csv'))):
@@ -83,7 +81,7 @@ def get_sea_level():
             tops.append(bz[1])
     return max(tops, default=0.0)
 
-
+#identifica quais os ficheiros de log a usar, dependendo do valor selecionado no dropdown
 def get_log_files(selected_value):
     if not selected_value:
         return []
@@ -91,7 +89,7 @@ def get_log_files(selected_value):
         return sorted(glob.glob(str(LOGS_DIR / '*.csv')))
     return [selected_value]
 
-
+#identifica o tempo decorrido para cada log a partir do timestamp
 def get_timestamp_time(df):
     if 'header.stamp.secs' in df.columns:
         timestamps = pd.to_numeric(df['header.stamp.secs'], errors='coerce').to_numpy(dtype=float)
@@ -101,7 +99,7 @@ def get_timestamp_time(df):
         return timestamps - timestamps[0]
     return np.arange(len(df), dtype=float)
 
-
+#fomrmata a duração em minutos e segundos
 def format_duration(seconds):
     total_seconds = max(0, int(seconds))
     minutes, seconds = divmod(total_seconds, 60)
@@ -109,25 +107,22 @@ def format_duration(seconds):
 
 
 def merge_span(current, new):
-    """Junta dois intervalos (min, max), ignorando None."""
     if new is None:
         return current
     if current is None:
         return new
     return (min(current[0], new[0]), max(current[1], new[1]))
 
-
+#define os limites dos logs
 def collect_bounds(log_files):
-    """Limites x, y, z (log inteiro) de um conjunto de ficheiros."""
     full_x = full_y = full_z = None
     for file_path in log_files:
         bx, by, bz = get_bounds(file_path, Path(file_path).stat().st_mtime_ns)
         full_x, full_y, full_z = merge_span(full_x, bx), merge_span(full_y, by), merge_span(full_z, bz)
     return full_x, full_y, full_z
 
-
+#identifica os intervalos fixos dos eixos: x, y, z do 3D 
 def compute_ranges(full_x, full_y, full_z, sea_z):
-    """Intervalos fixos dos eixos: x, y, z do 3D (mar em z=0, no topo) e profundidade."""
     x_range = y_range = None
     depth_range = [0, 55]            # gráfico de profundidade (invertido: 0 em cima)
     z_range_3d = [-55, 2]            # 3D: z normal, mar em z = 0 (o ponto mais alto)
@@ -147,7 +142,7 @@ def compute_ranges(full_x, full_y, full_z, sea_z):
 
     return x_range, y_range, depth_range, z_range_3d
 
-
+#variáveis para conversão geodésica
 WGS84_A = 6378137.0
 WGS84_E2 = 6.69437999014e-3
 
@@ -159,7 +154,6 @@ def geodetic_to_ecef(lat, lon, h):
                      (n + h) * np.cos(lat) * np.sin(lon),
                      (n * (1 - WGS84_E2) + h) * np.sin(lat)])
 
-
 def geodetic_to_ned(lat, lon, h, lat0, lon0, h0):
     """Posição (lat, lon, h) em metros norte/este/baixo, com origem em (lat0, lon0, h0)."""
     d = geodetic_to_ecef(lat, lon, h) - geodetic_to_ecef(lat0, lon0, h0)
@@ -169,9 +163,8 @@ def geodetic_to_ned(lat, lon, h, lat0, lon0, h0):
     down = -np.cos(p) * np.cos(l) * d[0] - np.cos(p) * np.sin(l) * d[1] - np.sin(p) * d[2]
     return float(north), float(east), float(down)
 
-
+#identifica a última posição do robot até ao instante t, retornando lat, lon e z
 def position_at(file_path, t):
-    """Última posição (lat, lon, z) do robot até ao instante t."""
     df = load_log(file_path, Path(file_path).stat().st_mtime_ns)
     if df.empty:
         return None
@@ -181,6 +174,7 @@ def position_at(file_path, t):
     z = float(row['pose.pose.position.z']) if 'pose.pose.position.z' in df.columns else 0.0
     return float(row['pose.pose.position.x']), float(row['pose.pose.position.y']), z
 
+#identifica a posição inicial do robot
 def get_origin(): # Descobrir o ponto incial dado e colocar em NED
     cfg = CONFIG['radar']['origin']
     if cfg['lat'] is not None and cfg['lon'] is not None:
@@ -192,11 +186,23 @@ def get_origin(): # Descobrir o ponto incial dado e colocar em NED
         return None
     return first[0], first[1], get_sea_level()
 
+#calcula a distância 
+@lru_cache(maxsize=16)
+def get_cumulative_distance(file_path, modified_time):
+    df = load_log(file_path, modified_time)
+    lat = pd.to_numeric(df['pose.pose.position.x'], errors='coerce').to_numpy(dtype=float)
+    lon = pd.to_numeric(df['pose.pose.position.y'], errors='coerce').to_numpy(dtype=float)
+    if 'pose.pose.position.z' in df.columns:
+        z = pd.to_numeric(df['pose.pose.position.z'], errors='coerce').to_numpy(dtype=float)
+    else:
+        z = np.zeros(len(df))
+    ecef = geodetic_to_ecef(lat, lon, z)                      # (3, N)
+    steps = np.nan_to_num(np.linalg.norm(np.diff(ecef, axis=1), axis=0))
+    return np.concatenate(([0.0], np.cumsum(steps)))
 
 
-# --------------------------------------------------------------------------- JS (corre no browser)
-# Atualiza só os dados dos traços 3D com Plotly.restyle: o layout e a câmara não são tocados,
-# por isso o utilizador pode rodar/fazer zoom à vontade durante a reprodução.
+
+# Atualiza os dados dos graficos sem alteração da câmara
 RESTYLE_3D_JS = """
 function(data, figure) {
     const nu = window.dash_clientside.no_update;
@@ -214,8 +220,11 @@ function(data, figure) {
 """
 
 
-# --------------------------------------------------------------------------- callbacks
+#funcoes interativas
+
+
 def register_callbacks(app):
+    #Atualiza o intervalo de tempo do slider de reprodução
     @app.callback(
         Output('timestamp-slider', 'max'),
         Input('dropdown-log-selector', 'value')
@@ -229,6 +238,7 @@ def register_callbacks(app):
                 durations.append(float(get_timestamp_time(df)[-1]))
         return max(max(durations, default=0), 0.1)
 
+    # Atualiza o estado do botão de reprodução e o valor do slider de tempo
     @app.callback(
         [Output('timestamp-slider', 'value'),
          Output('playback-interval', 'disabled'),
@@ -257,7 +267,7 @@ def register_callbacks(app):
             return next_time, finished, '▶ Reproduzir' if finished else '⏸ Pausar'
         return no_update, no_update, no_update
 
-    # ---- Figura 3D: construída UMA vez por ficheiro selecionado (traços vazios + eixos fixos)
+    # Atualiza a figura 3D com base no log selecionado
     @app.callback(
         Output('graph-3d-view', 'figure'),
         Input('dropdown-log-selector', 'value')
@@ -311,7 +321,7 @@ def register_callbacks(app):
         )
         return fig
 
-    # ---- Atualização dos dados 3D no browser (sem mexer na câmara)
+    #Atualização dos dados 3D no browser (sem mexer na câmara)
     app.clientside_callback(
         RESTYLE_3D_JS,
         Output('restyle-dummy', 'data'),
@@ -319,6 +329,7 @@ def register_callbacks(app):
         Input('graph-3d-view', 'figure'),
     )
 
+    #Atualiza o radar e a lista de distâncias
     @app.callback(
         [Output('radar-view', 'figure'), Output('radar-distances', 'children')],
         [Input('radar-ref-selector', 'value'), Input('timestamp-slider', 'value')]
@@ -387,7 +398,7 @@ def register_callbacks(app):
         return fig, items
 
 
-    # ---- Restantes painéis, a cada instante
+    # Atualiza mapa 2D,grafico de profundidade, gráfico de velocidade, legenda e timestamps
     @app.callback(
         [Output('trajectory-layer-2d', 'children'),
          Output('traces3d-store', 'data'),
@@ -402,15 +413,18 @@ def register_callbacks(app):
          Input('timestamp-slider', 'max')]
     )
     def update_dashboards(selected_value, current_time, max_time):
+
         if not selected_value:
             return [], None, go.Figure(), go.Figure(), go.Figure(), [], [], '00:00 / 00:00'
 
+        #elementos
         map_elements_2d = []
         fig_depth = go.Figure()
         fig_speed = go.Figure()
         legend_elements = []
         timestamp_elements = []
         store_3d = {'key': selected_value, 'idx': [], 'x': [], 'y': [], 'z': []}
+
 
         fig_compass = go.Figure()
         fig_compass.update_layout(
@@ -452,6 +466,10 @@ def register_callbacks(app):
             else:
                 visible_df = df.loc[visible]
                 visible_elapsed = elapsed[visible]
+
+            cumulative = get_cumulative_distance(file_path, modified_time)
+            last_row = int(visible.sum()) - 1 if visible.any() else 0
+            traveled, total = float(cumulative[max(last_row, 0)]), float(cumulative[-1])
 
             x_vals = visible_df['pose.pose.position.x'].to_numpy()
             y_vals = visible_df['pose.pose.position.y'].to_numpy()
@@ -520,7 +538,11 @@ def register_callbacks(app):
 
             legend_elements.append(html.Div([
                 html.Span(className='legend-swatch', style={'backgroundColor': color}),
-                html.Span(filename),
+                html.Div([
+                    html.Div(filename, className='legend-name'),
+                    html.Div(f'{traveled:.0f} m percorridos', className='legend-dist'),
+                    html.Div(f'de {total:.0f} m no total', className='legend-dist'),
+                ]),
             ], className='legend-item'))
 
             if 'header.stamp.secs' in df.columns:
